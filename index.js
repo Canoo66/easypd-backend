@@ -62,24 +62,34 @@ app.post('/create-checkout', async (req, res) => {
   }
 });
 
-// Zahlung verifizieren: Frontend schickt session_id, wir pruefen bei Stripe ob wirklich bezahlt
+// Zahlung verifizieren: akzeptiert Checkout-Session (cs_...) ODER Zahlungs-ID (pi_...)
 app.get('/verify-payment', async (req, res) => {
   try {
     const sessionId = req.query.session_id;
-    if (!sessionId || !sessionId.startsWith('cs_')) {
+    if (!sessionId || (!sessionId.startsWith('cs_') && !sessionId.startsWith('pi_'))) {
       return res.status(400).json({ paid: false, error: 'Ungueltige Session-ID' });
     }
 
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    let paid = false;
+    let credits = 0;
 
-    if (session.payment_status !== 'paid') {
-      return res.json({ paid: false });
+    if (sessionId.startsWith('pi_')) {
+      // Zahlungs-ID (PaymentIntent) direkt pruefen
+      const intent = await stripe.paymentIntents.retrieve(sessionId);
+      paid = intent.status === 'succeeded';
+      if (paid) credits = getCreditsFromAmount(intent.amount);
+    } else {
+      // Checkout-Session pruefen
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      paid = session.payment_status === 'paid';
+      if (paid) {
+        credits = parseInt(session.metadata && session.metadata.credits) || 0;
+        if (!credits) credits = getCreditsFromAmount(session.amount_total);
+      }
     }
 
-    // Credits aus Metadata (create-checkout) oder aus dem Betrag ableiten (Payment Links)
-    let credits = parseInt(session.metadata && session.metadata.credits) || 0;
-    if (!credits) {
-      credits = getCreditsFromAmount(session.amount_total);
+    if (!paid) {
+      return res.json({ paid: false });
     }
 
     if (!credits) {
