@@ -72,6 +72,7 @@ app.get('/verify-payment', async (req, res) => {
 
     let paid = false;
     let credits = 0;
+    let canonicalId = sessionId;
 
     if (sessionId.startsWith('pi_')) {
       // Zahlungs-ID (PaymentIntent) direkt pruefen
@@ -85,6 +86,8 @@ app.get('/verify-payment', async (req, res) => {
       if (paid) {
         credits = parseInt(session.metadata && session.metadata.credits) || 0;
         if (!credits) credits = getCreditsFromAmount(session.amount_total);
+        // Zahlungs-ID als eindeutiger Anker (verhindert Doppel-Einloesung via cs_ UND pi_)
+        if (session.payment_intent) canonicalId = session.payment_intent;
       }
     }
 
@@ -96,7 +99,7 @@ app.get('/verify-payment', async (req, res) => {
       return res.json({ paid: false, error: 'Credits konnten nicht ermittelt werden' });
     }
 
-    res.json({ paid: true, credits: credits, session_id: sessionId });
+    res.json({ paid: true, credits: credits, session_id: canonicalId });
   } catch (err) {
     console.error('Verify error:', err);
     res.status(500).json({ paid: false, error: err.message });
